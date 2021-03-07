@@ -7,8 +7,8 @@
 #include <sched.h>
 
 #define ARGS 1
-#ifndef CACHE_LINE_SIZE
-#define CACHE_LINE_SIZE 64
+#ifndef L1D_CACHE_LINE_SIZE
+#define L1D_CACHE_LINE_SIZE 64
 #endif
 
 unsigned cores = 2;
