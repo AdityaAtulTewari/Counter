@@ -5,7 +5,7 @@
 inline void m5_reset_stats(unsigned a, unsigned b){}
 inline void m5_dump_reset_stats(unsigned a, unsigned b){}
 
-std::atomic<uint64_t> __attribute__((aligned(CACHE_LINE_SIZE))) counter = 1;
+std::atomic<uint64_t> __attribute__((aligned(L1D_CACHE_LINE_SIZE))) counter = 1;
 unsigned n;
 std::atomic<unsigned> bar = 0;
 
@@ -19,7 +19,7 @@ void* scount(void* v)
   return nullptr;
 }
 
-struct DChannel
+struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) DChannel
 {
   std::atomic<uint64_t> counter;
   DChannel() : counter(0) {}
