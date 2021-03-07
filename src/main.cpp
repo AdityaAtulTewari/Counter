@@ -3,7 +3,6 @@
 #include "timing.h"
 #include <getopt.h>
 #include <pthread.h>
-#include <stdatomic.h>
 #include <thread>
 #include <sched.h>
 
@@ -12,6 +11,7 @@
 #define CACHE_LINE_SIZE 64
 #endif
 
+unsigned cores = 2;
 #include "counter.h"
 
 void usage(char* arg0)
@@ -37,13 +37,16 @@ void parse_args(int argc, char** argv,
   char* arg0 = argv[0];
   auto us = [arg0] () {usage(arg0);};
   int helper;
-  while((opt = getopt(argc, argv, "svp:")) != -1)
+  while((opt = getopt(argc, argv, "svdp:")) != -1)
   {
     std::ostringstream num_hwpar;
     switch(opt)
     {
       case 'v' :
         *at = VTL_ALLOC;
+        break;
+      case 'd' :
+        *at = DYN_ALLOC;
         break;
       case 's' :
         *at = STD_ALLOC;
@@ -92,7 +95,6 @@ void parse_args(int argc, char** argv,
 
 int main(int argc, char** argv)
 {
-  unsigned cores = 2;
   bool sched = false;
   ALLOC_TYPE at = STD_ALLOC;
   parse_args(argc, argv, &n, &at, &sched, &cores);
@@ -129,11 +131,11 @@ int main(int argc, char** argv)
   }
   else if(at == DYN_ALLOC)
   {
-    Channel** out = (Channel**) malloc(sizeof(Channel*) * (cores + 1));
+    DChannel** out = (DChannel**) malloc(sizeof(DChannel*) * (cores + 1));
     for(unsigned i = 0; i < cores; i++)
     {
       auto count = (i == 1) ? 1 : 0;
-      out[i] = new Channel(count);
+      out[i] = new DChannel(count);
     }
     out[cores] = out[0];
     t.s();
@@ -147,6 +149,39 @@ int main(int argc, char** argv)
     t.e();
     t.p("BUFFER");
   }
+#ifdef VL
+  else if(at == VTL_ALLOC)
+  {
+    int* fds = malloc(sizeof(int) * cores);
+    for(unsigned i = 0; i < cores; i++)
+    {
+      auto fd = mkvl();
+      if(fd < 0)
+      {
+        std::cerr << "Unable to allocate a vl" << std::endl;
+        exit(-5);
+      }
+      fds[i] = fd;
+    }
+    VArgs** vargs = malloc(sizeof(VArgs*) * cores);
+    for(unsigned i = 0; i < cores - 1; i++)
+    {
+      vargs[i] = new VArgs(fd[i], fd[i+1]);
+    }
+    vargs[cores - 1] = new VArgs(fd[cores - 1], fd[0]);
+    vargs[1]->push(1);
+    t.s();
+    m5_reset_stats(0,0);
+    for(unsigned i = 1; i < cores; i++)
+    {
+      pthread_create(&threads[i], &attr[i], vcount, (void*) vargs[i]);
+    }
+    vcount((void*) vargs[0]);
+    m5_dump_reset_stats(0,0);
+    t.e();
+    t.p("VTLINK");
+  }
+#endif
   else
   {
     std::cerr << "Invalid Buffer type" << std::endl;
