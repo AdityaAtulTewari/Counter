@@ -133,7 +133,6 @@ void* vcount(void* args)
     cont->push(num+1);
   }
   m5_dump_reset_stats(0,0);
-  std::cerr << num << std::endl;
   return nullptr;
 }
 
