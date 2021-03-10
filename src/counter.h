@@ -1,9 +1,7 @@
 #ifndef _COUNTER_H_
 #define _COUNTER_H_
 #include <atomic>
-
-inline void m5_reset_stats(unsigned a, unsigned b){}
-inline void m5_dump_reset_stats(unsigned a, unsigned b){}
+#include <cassert>
 
 std::atomic<uint64_t> __attribute__((aligned(L1D_CACHE_LINE_SIZE))) counter = 1;
 unsigned n;
@@ -43,9 +41,6 @@ void* dcount(void* args)
   DChannel* out = channels[1];
   uint64_t num = 0;
 
-  bar.fetch_add(1, std::memory_order_relaxed);
-  while(bar.load(std::memory_order_relaxed) != cores);
-
   while(n > num)
   {
     num = in->pop();
@@ -54,18 +49,19 @@ void* dcount(void* args)
   return nullptr;
 }
 
-#ifdef VL
-#include "vl/vl.h"
+#include <vl/vl.h>
 struct VPush
 {
   vlendpt_t end;
-  VPush(int fd) :
+  VPush(int fd)
   {
-    open_twin_vl_as_producer(fd, &end, 1);
+    int err = open_twin_vl_as_producer(fd, &end, 1);
+    assert(!err);
   }
   inline void push(uint64_t c)
   {
     twin_vl_push_strong(&end, c);
+    twin_vl_flush(&end);
   }
   ~VPush()
   {
@@ -78,7 +74,8 @@ struct VPop
   vlendpt_t end;
   VPop(int fd)
   {
-    open_twin_vl_as_consumer(fd, &end, 1);
+    int err = open_twin_vl_as_consumer(fd, &end, 1);
+    assert(!err);
   }
   inline uint64_t pop()
   {
@@ -94,16 +91,16 @@ struct VPop
 
 struct VArgs
 {
-  VPop pop;
-  VPush push;
-  VArgs(int fdC, int fdP) : pop(VPop(fdC)), push(VPush(fdP)) {}
+  VPop po;
+  VPush pu;
+  VArgs(int fdC, int fdP) : po(VPop(fdC)), pu(VPush(fdP)) {}
   inline uint64_t pop()
   {
-    return pop.pop();
+    return po.pop();
   }
   inline void push(uint64_t c)
   {
-    push.push(c);
+    pu.push(c);
   }
 };
 
@@ -112,16 +109,12 @@ void* vcount(void* args)
   auto cont = (VArgs*) args;
   uint64_t num = 0;
 
-  bar.fetch_add(1, std::memory_order_relaxed);
-  while(bar.load(std::memory_order_relaxed) != cores);
-
   while(n > num)
   {
-    num = in->pop();
-    out-> push(num+1);
+    num = cont->pop();
+    cont->push(num+1);
   }
   return nullptr;
 }
-#endif /* VL */
 
 #endif

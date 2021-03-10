@@ -5,6 +5,8 @@
 #include <pthread.h>
 #include <thread>
 #include <sched.h>
+#include <gem5/m5ops.h>
+#include <unistd.h>
 
 #define ARGS 1
 #ifndef L1D_CACHE_LINE_SIZE
@@ -100,8 +102,8 @@ int main(int argc, char** argv)
   parse_args(argc, argv, &n, &at, &sched, &cores);
 
   Timing<true> t;
-  pthread_t* threads = (pthread_t*) malloc(sizeof(std::thread) * cores);
-  pthread_attr_t* attr = (pthread_attr_t*) malloc(sizeof(pthread_attr_t) * cores);
+  pthread_t* threads = new pthread_t[cores];
+  pthread_attr_t* attr = new pthread_attr_t[cores];
   for(unsigned i = 0; i < cores; i++)
   {
     cpu_set_t mask;
@@ -118,41 +120,54 @@ int main(int argc, char** argv)
   if(at == STD_ALLOC)
   {
     t.s();
-    m5_reset_stats(0, 0);
     for(unsigned i = 1; i < cores; i++)
     {
       pthread_create(&threads[i], &attr[i], scount, nullptr);
     }
+    m5_reset_stats(0, 0);
     scount(nullptr);
     m5_dump_reset_stats(0, 0);
     t.e();
+    for(unsigned i = 1; i < cores; i++)
+    {
+      pthread_join(threads[i], nullptr);
+    }
 
     t.p("ATOMIC");
   }
   else if(at == DYN_ALLOC)
   {
-    DChannel** out = (DChannel**) malloc(sizeof(DChannel*) * (cores + 1));
+    DChannel** out = new DChannel*[cores + 1];
     for(unsigned i = 0; i < cores; i++)
     {
-      auto count = (i == 1) ? 1 : 0;
-      out[i] = new DChannel(count);
+      out[i] = new DChannel();
     }
     out[cores] = out[0];
     t.s();
-    m5_reset_stats(0, 0);
     for(unsigned i = 1; i < cores; i++)
     {
       pthread_create(&threads[i], &attr[i], dcount, (void*) &out[i]);
     }
+    m5_reset_stats(0, 0);
+    out[1]->counter.store(1, std::memory_order_relaxed);
     dcount((void*) &out[0]);
     m5_dump_reset_stats(0, 0);
     t.e();
+    for(unsigned i = 1; i < cores; i++)
+    {
+      pthread_join(threads[i], nullptr);
+    }
+    for(unsigned i = 0; i < cores; i++)
+    {
+      delete out[i];
+    }
+    delete[] out;
+
     t.p("BUFFER");
   }
-#ifdef VL
   else if(at == VTL_ALLOC)
   {
-    int* fds = malloc(sizeof(int) * cores);
+    int* fds = new int[cores];
     for(unsigned i = 0; i < cores; i++)
     {
       auto fd = mkvl();
@@ -163,29 +178,42 @@ int main(int argc, char** argv)
       }
       fds[i] = fd;
     }
-    VArgs** vargs = malloc(sizeof(VArgs*) * cores);
+    VArgs** vargs = new VArgs*[cores];
     for(unsigned i = 0; i < cores - 1; i++)
     {
-      vargs[i] = new VArgs(fd[i], fd[i+1]);
+      vargs[i] = new VArgs(fds[i], fds[i+1]);
     }
-    vargs[cores - 1] = new VArgs(fd[cores - 1], fd[0]);
-    vargs[1]->push(1);
+    vargs[cores - 1] = new VArgs(fds[cores - 1], fds[0]);
     t.s();
-    m5_reset_stats(0,0);
     for(unsigned i = 1; i < cores; i++)
     {
       pthread_create(&threads[i], &attr[i], vcount, (void*) vargs[i]);
     }
+    m5_reset_stats(0,0);
+    vargs[0]->push(1);
     vcount((void*) vargs[0]);
     m5_dump_reset_stats(0,0);
     t.e();
+    for(unsigned i = 1; i < cores; i++)
+    {
+      pthread_join(threads[i], nullptr);
+    }
+    for(unsigned i = 0; i < cores; i++)
+    {
+      delete vargs[i];
+    }
+    delete[] vargs;
+    delete[] fds;
+
     t.p("VTLINK");
   }
-#endif
   else
   {
     std::cerr << "Invalid Buffer type" << std::endl;
   }
+  delete[] threads;
+  delete[] attr;
+
 
   return 0;
 }
