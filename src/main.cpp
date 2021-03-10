@@ -5,7 +5,6 @@
 #include <pthread.h>
 #include <thread>
 #include <sched.h>
-#include <gem5/m5ops.h>
 #include <unistd.h>
 
 #define ARGS 1
@@ -124,9 +123,7 @@ int main(int argc, char** argv)
     {
       pthread_create(&threads[i], &attr[i], scount, nullptr);
     }
-    m5_reset_stats(0, 0);
     scount(nullptr);
-    m5_dump_reset_stats(0, 0);
     t.e();
     for(unsigned i = 1; i < cores; i++)
     {
@@ -143,15 +140,13 @@ int main(int argc, char** argv)
       out[i] = new DChannel();
     }
     out[cores] = out[0];
-    t.s();
     for(unsigned i = 1; i < cores; i++)
     {
       pthread_create(&threads[i], &attr[i], dcount, (void*) &out[i]);
     }
-    m5_reset_stats(0, 0);
     out[1]->counter.store(1, std::memory_order_relaxed);
+    t.s();
     dcount((void*) &out[0]);
-    m5_dump_reset_stats(0, 0);
     t.e();
     for(unsigned i = 1; i < cores; i++)
     {
@@ -184,15 +179,13 @@ int main(int argc, char** argv)
       vargs[i] = new VArgs(fds[i], fds[i+1]);
     }
     vargs[cores - 1] = new VArgs(fds[cores - 1], fds[0]);
-    t.s();
     for(unsigned i = 1; i < cores; i++)
     {
       pthread_create(&threads[i], &attr[i], vcount, (void*) vargs[i]);
     }
-    m5_reset_stats(0,0);
     vargs[0]->push(1);
+    t.s();
     vcount((void*) vargs[0]);
-    m5_dump_reset_stats(0,0);
     t.e();
     for(unsigned i = 1; i < cores; i++)
     {

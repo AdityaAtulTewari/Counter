@@ -7,13 +7,22 @@ std::atomic<uint64_t> __attribute__((aligned(L1D_CACHE_LINE_SIZE))) counter = 1;
 unsigned n;
 std::atomic<unsigned> bar = 0;
 
+#ifndef NOGEM5
+#include <gem5/m5ops.h>
+#else
+inline void m5_reset_stats(unsigned a, unsigned b){}
+inline void m5_dump_reset_stats(unsigned a, unsigned b){}
+#endif
+
+
 void* scount(void* v)
 {
   (void) v;
+  m5_reset_stats(0,0);
   bar.fetch_add(1, std::memory_order_relaxed);
   while(bar.load(std::memory_order_relaxed) != cores);
-
   while(n > counter.fetch_add(1, std::memory_order_relaxed));
+  m5_dump_reset_stats(0,0);
   return nullptr;
 }
 
@@ -41,11 +50,16 @@ void* dcount(void* args)
   DChannel* out = channels[1];
   uint64_t num = 0;
 
+  m5_reset_stats(0,0);
+  bar.fetch_add(1, std::memory_order_relaxed);
+  while(bar.load(std::memory_order_relaxed) != cores);
+
   while(n > num)
   {
     num = in->pop();
     out->push(num + 1);
   }
+  m5_dump_reset_stats(0,0);
   return nullptr;
 }
 
@@ -109,11 +123,17 @@ void* vcount(void* args)
   auto cont = (VArgs*) args;
   uint64_t num = 0;
 
+  m5_reset_stats(0,0);
+  bar.fetch_add(1, std::memory_order_relaxed);
+  while(bar.load(std::memory_order_relaxed) != cores);
+
   while(n > num)
   {
     num = cont->pop();
     cont->push(num+1);
   }
+  m5_dump_reset_stats(0,0);
+  std::cerr << num << std::endl;
   return nullptr;
 }
 
