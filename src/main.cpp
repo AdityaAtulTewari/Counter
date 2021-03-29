@@ -17,14 +17,15 @@ unsigned cores = 2;
 
 void usage(char* arg0)
 {
-  std::cerr << "Usage:\t" << arg0 << "[-v -s -p[1-CORES]] n" << std::endl;
+  std::cerr << "Usage:\t" << arg0 << "[-v -n -s -p[1-CORES]] n" << std::endl;
 }
 
-enum ALLOC_TYPE
+enum QUEUE_TYPE
 {
- STD_ALLOC,
- DYN_ALLOC,
- VTL_ALLOC
+ ATOMIC,
+ DIRECT,
+ NONATM,
+ VTLINK,
 };
 
 //may return 0 when not able to detect
@@ -32,25 +33,28 @@ const auto proc_count = std::thread::hardware_concurrency();
 
 void parse_args(int argc, char** argv,
     unsigned* n,
-    ALLOC_TYPE* at, bool* sched, unsigned* cores)
+    QUEUE_TYPE* at, bool* sched, unsigned* cores)
 {
   int opt;
   char* arg0 = argv[0];
   auto us = [arg0] () {usage(arg0);};
   int helper;
-  while((opt = getopt(argc, argv, "svdp:")) != -1)
+  while((opt = getopt(argc, argv, "sdnvp:")) != -1)
   {
     std::ostringstream num_hwpar;
     switch(opt)
     {
       case 'v' :
-        *at = VTL_ALLOC;
+        *at = VTLINK;
         break;
       case 'd' :
-        *at = DYN_ALLOC;
+        *at = DIRECT;
+        break;
+      case 'n' :
+        *at = NONATM;
         break;
       case 's' :
-        *at = STD_ALLOC;
+        *at = ATOMIC;
         break;
       case 'p' :
         helper = atoi(optarg);
@@ -97,7 +101,7 @@ void parse_args(int argc, char** argv,
 int main(int argc, char** argv)
 {
   bool sched = false;
-  ALLOC_TYPE at = STD_ALLOC;
+  QUEUE_TYPE at = ATOMIC;
   parse_args(argc, argv, &n, &at, &sched, &cores);
 
   Timing<true> t;
@@ -116,7 +120,7 @@ int main(int argc, char** argv)
     }
   }
 
-  if(at == STD_ALLOC)
+  if(at == ATOMIC)
   {
     t.s();
     for(unsigned i = 1; i < cores; i++)
@@ -132,7 +136,7 @@ int main(int argc, char** argv)
 
     t.p("ATOMIC");
   }
-  else if(at == DYN_ALLOC)
+  else if(at == DIRECT)
   {
     DChannel** out = new DChannel*[cores + 1];
     for(unsigned i = 0; i < cores; i++)
@@ -158,9 +162,37 @@ int main(int argc, char** argv)
     }
     delete[] out;
 
-    t.p("BUFFER");
+    t.p("DIRECT");
   }
-  else if(at == VTL_ALLOC)
+  else if(at == NONATM)
+  {
+    NChannel** out = new NChannel*[cores + 1];
+    for(unsigned i = 0; i < cores; i++)
+    {
+      out[i] = new NChannel();
+    }
+    out[cores] = out[0];
+    for(unsigned i = 1; i < cores; i++)
+    {
+      pthread_create(&threads[i], &attr[i], ncount, (void*) &out[i]);
+    }
+    out[1]->counter = 1;
+    t.s();
+    ncount((void*) &out[0]);
+    t.e();
+    for(unsigned i = 1; i < cores; i++)
+    {
+      pthread_join(threads[i], nullptr);
+    }
+    for(unsigned i = 0; i < cores; i++)
+    {
+      delete out[i];
+    }
+    delete[] out;
+
+    t.p("NONATM");
+  }
+  else if(at == VTLINK)
   {
     int* fds = new int[cores];
     for(unsigned i = 0; i < cores; i++)
