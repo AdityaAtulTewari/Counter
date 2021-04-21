@@ -4,6 +4,7 @@ project(Counter)
 set(CMAKE_CXX_STANDARD 17)
 
 find_package( Threads )
+find_package( Boost )
 
 set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type (default Release)" FORCE)
 
@@ -18,6 +19,10 @@ else()
   target_include_directories(Counter PRIVATE "/benchmarks/VirtualLink/libvl")
   target_link_libraries(Counter /benchmarks/VirtualLink/libvl/libvl/libvl.a)
 
+endif()
+if(Boost_FOUND)
+  set(CMAKE_CXX_FLAGS "-DBOOST ${CMAKE_CXX_FLAGS}")
+  include_directories(${Boost_INCLUDE_DIRS})
 endif()
   target_link_libraries(Counter ${CMAKE_THREAD_LIBS_INIT})
 
