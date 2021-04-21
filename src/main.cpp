@@ -15,46 +15,70 @@
 unsigned cores = 2;
 #include "counter.h"
 
+inline size_t compute_size(size_t size) const
+{
+  switch (size)
+  {
+    case 8:
+      return 8;
+    case 16:
+      return 16;
+    case 32:
+      return 32;
+    case 64:
+      return 64;
+    case 128:
+      return 128;
+    case 256:
+      return 256;
+    case 512:
+      return 512;
+    default:
+      return 0;
+  }
+}
+
 void usage(char* arg0)
 {
-  std::cerr << "Usage:\t" << arg0 << "[-v -n -s -p[1-CORES]] n" << std::endl;
+  std::cerr << "Usage:\t" << arg0 << "[-s -v -b -n -p[2-CORES] -q[Direct DATASIZE] -i[Indirect DATASIZE]] n" << std::endl;
+  std::cerr << "-s: Single Occupancy" << std::endl;
+  std::cerr << "-v: VirtualLink" << std::endl;
+  std::cerr << "-b: Boost MPMC" << std::endl;
+  std::cerr << "-n: Boost SPSC" << std::endl;
 }
 
 enum QUEUE_TYPE
 {
- ATOMIC,
- DIRECT,
- NONATM,
+ SINGOC,
  VTLINK,
+ BOOSTM,
+ BOOSTS
 };
 
 //may return 0 when not able to detect
 const auto proc_count = std::thread::hardware_concurrency();
 
 void parse_args(int argc, char** argv,
-    unsigned* n,
-    QUEUE_TYPE* at, bool* sched, unsigned* cores)
+    unsigned& n, //Args
+    QUEUE_TYPE& at, unsigned& cores, unsigned& datasize, bool& direct, bool& touch) //Flags
 {
   int opt;
   char* arg0 = argv[0];
   auto us = [arg0] () {usage(arg0);};
   int helper;
-  while((opt = getopt(argc, argv, "sdnvp:")) != -1)
+  while((opt = getopt(argc, argv, "sdvtp:q:i:")) != -1)
   {
     std::ostringstream num_hwpar;
     switch(opt)
     {
+      case 't':
+        touch = true;
+        break;
       case 'v' :
         *at = VTLINK;
         break;
-      case 'd' :
-        *at = DIRECT;
-        break;
-      case 'n' :
-        *at = NONATM;
-        break;
       case 's' :
-        *at = ATOMIC;
+        *at = SINGOC;
         break;
       case 'p' :
         helper = atoi(optarg);
@@ -64,10 +88,33 @@ void parse_args(int argc, char** argv,
           us();
           exit(-4);
         }
-        *cores = (unsigned) helper;
+        cores = (unsigned) helper;
+        break;
+      case 'i' :
+        helper = atoi(optarg);
+        if (1 > helper)
+        {
+          std::cerr << "You did not provide a proper size input" << std::endl;
+          us();
+          exit(-7);
+        }
+        direct = false;
+        datasize = (unsigned) helper
+        break;
+      case 'q' :
+        helper = atoi(optarg);
+        if (1 > helper)
+        {
+          std::cerr << "You did not provide a proper size input" << std::endl;
+          us();
+          exit(-7);
+        }
+        datasize = (unsigned) helper
+        direct = true;
         break;
     }
   }
+
   std::istringstream sarr[ARGS];
   unsigned darr[ARGS];
   unsigned i;
@@ -100,11 +147,12 @@ void parse_args(int argc, char** argv,
 
 int main(int argc, char** argv)
 {
-  bool sched = false;
-  QUEUE_TYPE at = ATOMIC;
-  parse_args(argc, argv, &n, &at, &sched, &cores);
+  QUEUE_TYPE at = SINGOC;
+  unsigned datasize = 8;
+  bool direct = true;
+  bool touch = false;
+  parse_args(argc, argv, &n, &at, &cores, &datasize, &direct, &touch);
 
-  Timing<true> t;
   pthread_t* threads = new pthread_t[cores];
   pthread_attr_t* attr = new pthread_attr_t[cores];
   for(unsigned i = 0; i < cores; i++)
@@ -119,122 +167,58 @@ int main(int argc, char** argv)
       pthread_setaffinity_np(current_thread, sizeof(mask), &mask);
     }
   }
-
-  if(at == ATOMIC)
+  const s = compute_size(size);
+  if(s == 0)
   {
-    t.s();
-    for(unsigned i = 1; i < cores; i++)
-    {
-      pthread_create(&threads[i], &attr[i], scount, nullptr);
-    }
-    scount(nullptr);
-    t.e();
-    for(unsigned i = 1; i < cores; i++)
-    {
-      pthread_join(threads[i], nullptr);
-    }
-
-    t.p("ATOMIC");
-  }
-  else if(at == DIRECT)
-  {
-    DChannel** out = new DChannel*[cores + 1];
-    for(unsigned i = 0; i < cores; i++)
-    {
-      out[i] = new DChannel();
-    }
-    out[cores] = out[0];
-    for(unsigned i = 1; i < cores; i++)
-    {
-      pthread_create(&threads[i], &attr[i], dcount, (void*) &out[i]);
-    }
-    out[1]->counter.store(1, std::memory_order_relaxed);
-    t.s();
-    dcount((void*) &out[0]);
-    t.e();
-    for(unsigned i = 1; i < cores; i++)
-    {
-      pthread_join(threads[i], nullptr);
-    }
-    for(unsigned i = 0; i < cores; i++)
-    {
-      delete out[i];
-    }
-    delete[] out;
-
-    t.p("DIRECT");
-  }
-  else if(at == NONATM)
-  {
-    NChannel** out = new NChannel*[cores + 1];
-    for(unsigned i = 0; i < cores; i++)
-    {
-      out[i] = new NChannel();
-    }
-    out[cores] = out[0];
-    for(unsigned i = 1; i < cores; i++)
-    {
-      pthread_create(&threads[i], &attr[i], ncount, (void*) &out[i]);
-    }
-    out[1]->counter = 1;
-    t.s();
-    ncount((void*) &out[0]);
-    t.e();
-    for(unsigned i = 1; i < cores; i++)
-    {
-      pthread_join(threads[i], nullptr);
-    }
-    for(unsigned i = 0; i < cores; i++)
-    {
-      delete out[i];
-    }
-    delete[] out;
-
-    t.p("NONATM");
-  }
-  else if(at == VTLINK)
-  {
-    int* fds = new int[cores];
-    for(unsigned i = 0; i < cores; i++)
-    {
-      auto fd = mkvl();
-      if(fd < 0)
-      {
-        std::cerr << "Unable to allocate a vl" << std::endl;
-        exit(-5);
-      }
-      fds[i] = fd;
-    }
-    VArgs** vargs = new VArgs*[cores];
-    for(unsigned i = 0; i < cores - 1; i++)
-    {
-      vargs[i] = new VArgs(fds[i], fds[i+1]);
-    }
-    vargs[cores - 1] = new VArgs(fds[cores - 1], fds[0]);
-    for(unsigned i = 1; i < cores; i++)
-    {
-      pthread_create(&threads[i], &attr[i], vcount, (void*) vargs[i]);
-    }
-    vargs[0]->push(1);
-    t.s();
-    vcount((void*) vargs[0]);
-    t.e();
-    for(unsigned i = 1; i < cores; i++)
-    {
-      pthread_join(threads[i], nullptr);
-    }
-    for(unsigned i = 0; i < cores; i++)
-    {
-      delete vargs[i];
-    }
-    delete[] vargs;
-    delete[] fds;
-
-    t.p("VTLINK");
+    std::cerr << "Invalid Size" << std::endl;
   }
   else
   {
-    std::cerr << "Invalid Buffer type" << std::endl;
+    switch(at)
+    {
+      case SINGOC:
+        if(direct)
+        {
+          setup<SOC_Chan,s,touch>(threads, attr);
+        }
+        else
+        {
+          setup<SOZ_Chan,s,touch>(threads, attr);
+        }
+        break;
+      case VTLINK:
+        if(direct)
+        {
+          setup<VLC_Chan,s,touch>(threads, attr);
+        }
+        else
+        {
+          setup<SVL_Chan,s,touch>(threads, attr);
+        }
+        break;
+      case BOOSTM:
+        if(direct)
+        {
+          setup<BMC_Chan,s,touch>(threads, attr);
+        }
+        else
+        {
+          setup<BMZ_Chan,s,touch>(threads, attr);
+        }
+        break;
+      case BOOSTS:
+        if(direct)
+        {
+          setup<BSC_Chan,s,touch>(threads, attr);
+        }
+        else
+        {
+          setup<BSZ_Chan,s,touch>(threads, attr);
+        }
+        break;
+      default:
+        std::cerr << "Invalid Buffer type" << std::endl;
+    }
   }
   delete[] threads;
   delete[] attr;

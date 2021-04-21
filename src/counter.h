@@ -3,7 +3,6 @@
 #include <atomic>
 #include <cassert>
 
-std::atomic<uint64_t> __attribute__((aligned(L1D_CACHE_LINE_SIZE))) counter = 1;
 unsigned n;
 std::atomic<unsigned> bar = 0;
 
@@ -14,164 +13,318 @@ inline void m5_reset_stats(unsigned a, unsigned b){}
 inline void m5_dump_reset_stats(unsigned a, unsigned b){}
 #endif
 
-
-void* scount(void* v)
+unsigned x = 1, y = 4, z = 7, w = 13;
+unsigned rando()
 {
-  (void) v;
+  unsigned t = x;
+  t ^= t << 11;
+  t ^= t >> 8;
+  x = y;
+  y = z;
+  z = w;
+  w ^= w >> 19;
+  w ^= t;
+  return w;
+}
+
+template<typename T, size_t size, bool touch>
+void setup(pthread_t* threads, pthread_attr_t* attr)
+{
+  char* s = aligned_alloc(L1D_CACHE_LINE_SIZE, size);
+  for(size_t i = 0; i < size; i++) s[i] = (char) rando();
+  Timing<true> t;
+  for(unsigned i = 0; i < cores; i++)
+  {
+    out[i] = new T<size>(size, i);
+  }
+  out[cores] = out[0];
+  for(unsigned i = 1; i < cores; i++)
+  {
+    pthread_create(&threads[i], &attr[i], run<T,touch>, (void*) &out[i]);
+  }
+  while(!out[0]->push(s));
+  t.s();
+  run<T,touch>(&out[0]);
+  t.e();
+  for(unsigned i = 1; i < cores; i++)
+  {
+    pthread_join(threads[i], nullptr);
+  }
+  free(s);
+  t.p(typeid(T).name());
+}
+
+template<typename T, bool touch>
+void* run(void* args)
+{
+  auto channels = (T**) args;
+  T* inp = channels[0];
+  T* out = channels[1];
+  assert(inp->size == out->size);
+  unsigned count = tid;
+  char* old_s = (char*) aligned_alloc(L1D_CACHE_LINE_SIZE, inp->size);
+  char* s = old_s;
   m5_reset_stats(0,0);
   bar.fetch_add(1, std::memory_order_relaxed);
   while(bar.load(std::memory_order_relaxed) != cores);
-  while(n > counter.fetch_add(1, std::memory_order_relaxed));
+  while(n + cores > count)
+  {
+    while(!inp->pop(&s));
+    if(touch) for(size_t i = 0; i < inp->size; i += L1D_CACHE_LINE_SIZE) s[i] += 1;
+    while(!out->push(s));
+    count += cores;
+  }
   m5_dump_reset_stats(0,0);
+  free(old_s);
   return nullptr;
 }
 
-struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) DChannel
+template<size_t T>
+struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) SOC_Chan
 {
-  std::atomic<uint64_t> counter;
-  DChannel() : counter(0) {}
-  DChannel(uint64_t c) : counter(c) {}
-  inline void push(uint64_t c)
+  volatile char values[T];
+  char c;
+  size_t size;
+  unsigned tid;
+  SOC_Chan(size_t s, unsigned tid) : c(0), size(s),tid(tid) {assert(T >= s);}
+  inline int push(char* val)
   {
-    counter.store(c, std::memory_order_relaxed);
+    if(c) return 0;
+    for(unsigned i = 0; i < size; i++)
+    {
+      values[i] = val[i];
+    }
+    __atomic_store_n(&c, 1, __ATOMIC_RELEASE);
+    return 1;
   }
-  inline uint64_t pop()
+  inline void pop(char** val)
   {
-    uint64_t blah;
-    while(!(blah = counter.exchange(0, std::memory_order_relaxed)));
-    return blah;
+    if(!c) return 0;
+    for(size_t i = 0; i < size; i++)
+    {
+      (*val)[i] = values[i];
+    }
+    __atomic_store_n(&c, 0, __ATOMIC_ACQUIRE);
+    return 1;
   }
 };
 
-void* dcount(void* args)
+template<size_t T>
+struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) SOZ_Chan
 {
-  auto channels = (DChannel**) args;
-  DChannel* in = channels[0];
-  DChannel* out = channels[1];
-  uint64_t num = 0;
-
-  m5_reset_stats(0,0);
-  bar.fetch_add(1, std::memory_order_relaxed);
-  while(bar.load(std::memory_order_relaxed) != cores);
-
-  while(n > num)
+  volatile char* values;
+  size_t size;
+  unsigned tid;
+  SOZ_Chan(size_t s, unsigned tid) : values(nullptr), size(s), tid(tid) {}
+  inline int push(char* val)
   {
-    num = in->pop();
-    out->push(num + 1);
+    if(values) return 0;
+    values = val;
+    __atomic_store_n(&values, val, __ATOMIC_RELEASE);
+    return 1;
   }
-  m5_dump_reset_stats(0,0);
-  return nullptr;
-}
-
-struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) NChannel
-{
-  volatile uint64_t counter;
-  NChannel() : counter(0) {}
-  NChannel(uint64_t c) : counter(c) {}
-  inline void push(uint64_t c)
+  inline void pop(char** val)
   {
-    __atomic_store_n(&counter, c, __ATOMIC_RELAXED);
-  }
-  inline uint64_t pop()
-  {
-    uint64_t blah;
-    while(!counter);
-    blah = counter;
-    __atomic_store_n(&counter, 0, __ATOMIC_RELAXED);
-    return blah;
+    if(!values) return 0;
+    *val = values;
+    __atomic_store_n(&values, 0, __ATOMIC_ACQUIRE);
+    return 1;
   }
 };
 
-void* ncount(void* args)
-{
-  auto channels = (DChannel**) args;
-  DChannel* in = channels[0];
-  DChannel* out = channels[1];
-  uint64_t num = 0;
-
-  m5_reset_stats(0,0);
-  bar.fetch_add(1, std::memory_order_relaxed);
-  while(bar.load(std::memory_order_relaxed) != cores);
-
-  while(n > num)
-  {
-    num = in->pop();
-    out->push(num + 1);
-  }
-  m5_dump_reset_stats(0,0);
-  return nullptr;
-}
-
+#ifdef VL
 #include <vl/vl.h>
-struct VPush
+template<size_t T>
+struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) SDZ_Chan
 {
-  sd_vlendpt_t end;
-  VPush(int fd)
+  int fd;
+  sd_vlendpt_t pus;
+  sd_vlendpt_t pop;
+  size_t size;
+  unsigned tid;
+  SDZ_Chan(size_t s, unsigned tid) : fd(mkvl()), pus(0),pop(0), size(s), tid(tid)
   {
-    int err = open_twin_sd_vl_as_producer(fd, &end);
+    assert(fd >= 0);
+    int err;
+    err = open_twin_sd_vl_as_consumer(fd, &pop);
+    assert(!err);
+    err = open_twin_sd_vl_as_producer(fd, &pus);
     assert(!err);
   }
-  inline void push(uint64_t c)
+  inline int push(char* val)
   {
-    while(!twin_sd_vl_push_non(&end, c));
+    return twin_sd_vl_push_non(&pus, (uint64_t) val);
   }
-  ~VPush()
+  inline int pop(char** val)
   {
-    close_twin_sd_vl_as_producer(end);
+    return twin_sd_vl_pop_non(&pop, (uint64_t*) val);
+  }
+  ~SDZ_Chan()
+  {
+    close_twin_sd_vl_as_consumer(pus);
+    close_twin_sd_vl_as_consumer(pop);
   }
 };
 
-struct VPop
+template<size_t T>
+struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) VLZ_Chan
 {
-  sd_vlendpt_t end;
-  VPop(int fd)
+  int fd;
+  sd_vlendpt_t pus;
+  sd_vlendpt_t pop;
+  size_t size;
+  unsigned tid;
+  VLZ_Chan(size_t s, unsigned tid) : fd(mkvl()), pus(0), pop(0), size(s), tid(tid)
   {
-    int err = open_twin_sd_vl_as_consumer(fd, &end);
+    assert(fd >= 0);
+    int err;
+    err = open_twin_vl_as_consumer(fd, &pop);
+    assert(!err);
+    err = open_twin_vl_as_producer(fd, &pus);
     assert(!err);
   }
-  inline uint64_t pop()
+  inline int push(char* val)
   {
-    uint64_t blah;
-    while(!twin_sd_vl_pop_non(&end, &blah));
-    return blah;
+    return twin_vl_push_non(&pus, (uint64_t) val);
   }
-  ~VPop()
+  inline int pop(char** val)
   {
-    close_twin_sd_vl_as_consumer(end);
+    return twin_vl_pop_non(&pop, (uint64_t*) val);
   }
-};
-
-struct VArgs
-{
-  VPop po;
-  VPush pu;
-  VArgs(int fdC, int fdP) : po(VPop(fdC)), pu(VPush(fdP)) {}
-  inline uint64_t pop()
+  ~VLZ_Chan()
   {
-    return po.pop();
-  }
-  inline void push(uint64_t c)
-  {
-    pu.push(c);
+    close_twin_vl_as_producer(pus);
+    close_twin_vl_as_consumer(pop);
   }
 };
 
-void* vcount(void* args)
+template<size_t T>
+struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) VLC_Chan
 {
-  auto cont = (VArgs*) args;
-  uint64_t num = 0;
-
-  m5_reset_stats(0,0);
-  bar.fetch_add(1, std::memory_order_relaxed);
-  while(bar.load(std::memory_order_relaxed) != cores);
-
-  while(n > num)
+  int fd;
+  vlendpt_t pus;
+  vlendpt_t pop;
+  size_t size;
+  unsigned tid;
+  VLC_Chan(size_t s, unsigned tid) : fd(mkvl()), pus(0), pop(0), size(s), tid(tid)
   {
-    num = cont->pop();
-    cont->push(num+1);
+    assert(fd >= 0);
+    int err;
+    err = open_byte_vl_as_consumer(fd, &pop);
+    assert(!err);
+    err = open_byte_vl_as_producer(fd, &pus);
+    assert(!err);
   }
-  m5_dump_reset_stats(0,0);
-  return nullptr;
-}
+  inline int push(char* val)
+  {
+    for(size_t i = 0; i < size; i+= 62) line_vl_push_strong(&pus, val + i, min(size - i, 62));
+    return 1;
+  }
+  inline int pop(char** val)
+  {
+    size_t i = 0;
+    while(i < size)
+    {
+      size_t pcnt = min(size - i, 62);
+      line_vl_pop_strong(&pop, val+i, &pcnt);
+      i += pcnt;
+    }
 
-#endif
+    return 1;
+  }
+  ~VLC_Chan()
+  {
+    close_twin_vl_as_producer(pus);
+    close_twin_vl_as_consumer(pop);
+  }
+};
+#endif //VL
+
+#ifdef BOOST
+//correct boost queue
+template<size_t T>
+struct helper
+{
+  char blah[T];
+};
+
+#include <boost/lockfree/queue.hpp>
+template<size_t T>
+struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) BMC_Chan
+{
+  boost::lockfree::queue<helper<T>, boost::lockfree::fixed_sized<true>> q;
+  size_t size;
+  unsigned tid;
+  BMC_Chan(size_t s, unsigned tid) : q(4096/size), size(s), tid(tid) {}
+  inline int push(char* val)
+  {
+    helper& h = &(*(helper*) val);
+    return q.push(helper);
+  }
+  inline int pop(char** val)
+  {
+    helper& h = &(*(helper*) *val);
+    return q.pop(h);
+  }
+};
+
+template<size_t T>
+struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) BMZ_Chan
+{
+  boost::lockfree::queue<uintptr_t, boost::lockfree::fixed_sized<true>> q;
+  size_t size;
+  unsigned tid;
+  BMZ_Chan(size_t s, uint64_t tid) : q(4096/sizeof(uintptr_t)), size(s), tid(tid) {}
+  inline int push(char* val)
+  {
+    return q.push((uintptr_t) val);
+  }
+  inline int pop(char** val)
+  {
+    uintptr_t& h = &(*(uintptr_t*) val);
+    return q.pop(h);
+  }
+};
+
+#include <boost/lockfree/spsc_queue.hpp>
+template<size_t T>
+struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) BSC_Chan
+{
+  boost::lockfree::queue_spsc<helper<T>, boost::lockfree::fixed_sized<true>> q;
+  size_t size;
+  unsigned tid;
+  BSZ_Chan(size_t s, unsigned tid) : q(4096/sizeof(uintptr_t)), size(s), tid(tid) {}
+  inline int push(char* val)
+  {
+    helper& h = &(*(helper*) val);
+    return q.push(helper);
+  }
+  inline int pop(char** val)
+  {
+    helper& h = &(*(helper*) *val);
+    return q.pop(h);
+  }
+};
+
+template<size_t T>
+struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) BSZ_Chan
+{
+  boost::lockfree::queue_spsc<uintptr_t, boost::lockfree::fixed_sized<true>> q;
+  size_t size;
+  unsigned tid;
+  BSZ_Chan(size_t s, unsigned tid) : q(4096/sizeof(uintptr_t)), size(s), tid(tid) {}
+  inline int push(char* val)
+  {
+    return q.push((uintptr_t) val);
+  }
+  inline int pop(char** val)
+  {
+    uintptr_t& h = &(*(uintptr_t*) val);
+    return q.pop(h);
+  }
+};
+
+#endif //BOOST
+
+
+#endif //_COUNTER_H_
