@@ -5,6 +5,7 @@
 
 unsigned n;
 std::atomic<unsigned> bar = 0;
+const size_t frag = 60;
 
 #ifndef NOGEM5
 #include <gem5/m5ops.h>
@@ -170,7 +171,7 @@ struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) VLC_Chan
   }
   inline int push(uint8_t* val)
   {
-    for(size_t i = 0; i < size; i+= 62) line_vl_push_strong(&pus, val + i, std::min(size - i, (size_t) 62u));
+    for(size_t i = 0; i < size; i+= frag) line_vl_push_strong(&pus, val + i, std::min(size - i, frag));
     byte_vl_flush(&pus);
     return 1;
   }
@@ -179,7 +180,7 @@ struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) VLC_Chan
     size_t i = 0;
     while(i < size)
     {
-      size_t pcnt = std::min(size - i, (size_t) 62u);
+      size_t pcnt = std::min(size - i, frag);
       line_vl_pop_strong(&pop, (*val)+i, &pcnt);
       i += pcnt;
     }
