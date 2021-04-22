@@ -18,8 +18,9 @@ else()
   target_link_libraries(Counter /benchmarks/VirtualLink/near-data-sim/util/m5/libm5.a)
   target_include_directories(Counter PRIVATE "/benchmarks/VirtualLink/libvl")
   target_link_libraries(Counter /benchmarks/VirtualLink/libvl/libvl/libvl.a)
-
+  set(CMAKE_CXX_FLAGS "-DVL ${CMAKE_CXX_FLAGS}")
 endif()
+
 if(Boost_FOUND)
   set(CMAKE_CXX_FLAGS "-DBOOST ${CMAKE_CXX_FLAGS}")
   include_directories(${Boost_INCLUDE_DIRS})
