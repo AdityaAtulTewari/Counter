@@ -284,7 +284,7 @@ struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) BSZ_Chan
 template<typename T, bool touch>
 void* run(void* args)
 {
-  uint8_t* random_sum = malloc(sizeof(uint8_t));
+  uint8_t* random_sum = (uint8_t*) malloc(sizeof(uint8_t));
   auto channels = (T**) args;
   T* inp = channels[0];
   T* out = channels[1];
