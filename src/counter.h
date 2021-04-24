@@ -5,7 +5,7 @@
 
 unsigned n;
 std::atomic<unsigned> bar = 0;
-const size_t frag = 60;
+const size_t frag = 8;
 
 #ifndef NOGEM5
 #include <gem5/m5ops.h>
@@ -164,33 +164,27 @@ struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) VLC_Chan
   {
     assert(fd >= 0);
     int err;
-    err = open_byte_vl_as_consumer(fd, &pop, 1);
+    err = open_twin_vl_as_consumer(fd, &pop, 1);
     assert(!err);
-    err = open_byte_vl_as_producer(fd, &pus, 1);
+    err = open_twin_vl_as_producer(fd, &pus, 1);
     assert(!err);
   }
   inline int push(uint8_t* val)
   {
-    for(size_t i = 0; i < size; i+= frag) line_vl_push_strong(&pus, val + i, std::min(size - i, frag));
-    byte_vl_flush(&pus);
+    for(size_t i = 0; i < size; i+= frag) twin_vl_push_strong(&pus, *(uint64_t*) (val + i), std::min(size - i, frag));
+    twin_vl_flush(&pus);
     return 1;
   }
   inline int popo(uint8_t** val)
   {
     size_t i = 0;
-    while(i < size)
-    {
-      size_t pcnt = std::min(size - i, frag);
-      line_vl_pop_strong(&pop, (*val)+i, &pcnt);
-      i += pcnt;
-    }
-
+    for(size_t i = 0; i < size; i += frag) twin_vl_pop_strong(&pop, (uint64_t*) ((*val)+i));
     return 1;
   }
   ~VLC_Chan()
   {
-    close_byte_vl_as_producer(pus);
-    close_byte_vl_as_consumer(pop);
+    close_twin_vl_as_producer(pus);
+    close_twin_vl_as_consumer(pop);
   }
 };
 #endif //VL
