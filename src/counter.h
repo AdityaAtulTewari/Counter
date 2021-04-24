@@ -171,7 +171,7 @@ struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) VLC_Chan
   }
   inline int push(uint8_t* val)
   {
-    for(size_t i = 0; i < size; i+= frag) twin_vl_push_strong(&pus, *(uint64_t*) (val + i), std::min(size - i, frag));
+    for(size_t i = 0; i < size; i+= frag) twin_vl_push_strong(&pus, *(uint64_t*) (val + i));
     twin_vl_flush(&pus);
     return 1;
   }
