@@ -25,5 +25,10 @@ if(Boost_FOUND)
   set(CMAKE_CXX_FLAGS "-DBOOST ${CMAKE_CXX_FLAGS}")
   include_directories(${Boost_INCLUDE_DIRS})
 endif()
-  target_link_libraries(Counter ${CMAKE_THREAD_LIBS_INIT})
 
+if(EA)
+  set(CMAKE_CXX_FLAGS "-DEA ${CMAKE_CXX_FLAGS}")
+  target_include_directories(Counter PRIVATE "repos/MPMCQueue/include")
+endif()
+
+target_link_libraries(Counter ${CMAKE_THREAD_LIBS_INIT})

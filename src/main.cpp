@@ -22,6 +22,7 @@ void usage(char* arg0)
   std::cerr << "-v: VirtualLink" << std::endl;
   std::cerr << "-b: Boost MPMC" << std::endl;
   std::cerr << "-n: Boost SPSC" << std::endl;
+  std::cerr << "-e: EA MPMC" << std::endl;
   std::cerr << "-t: Touch values" << std::endl;
 }
 
@@ -30,7 +31,8 @@ enum QUEUE_TYPE
  SINGOC,
  VTLINK,
  BOOSTM,
- BOOSTS
+ BOOSTS,
+ EAMPMC
 };
 
 //may return 0 when not able to detect
@@ -43,13 +45,16 @@ void parse_args(int argc, char** argv,
   char* arg0 = argv[0];
   auto us = [arg0] () {usage(arg0);};
   int helper;
-  while((opt = getopt(argc, argv, "sbnvtp:q:i:")) != -1)
+  while((opt = getopt(argc, argv, "sbnvetp:q:i:")) != -1)
   {
     std::ostringstream num_hwpar;
     switch(opt)
     {
       case 's' :
         at = SINGOC;
+        break;
+      case 'e' :
+        at = EAMPMC;
         break;
       case 'v' :
         at = VTLINK;
@@ -618,6 +623,124 @@ int main(int argc, char** argv)
     }
   }
 #endif //BOOST
+#ifdef EA
+  else if(at == EAMPMC && direct && touch)
+  {
+    switch (datasize)
+    {
+      case 8:
+        setup<EAC_Chan<  8>,  8, true>(threads, attr);
+        break;
+      case 16:
+        setup<EAC_Chan< 16>, 16, true>(threads, attr);
+        break;
+      case 32:
+        setup<EAC_Chan< 32>, 32, true>(threads, attr);
+        break;
+      case 64:
+        setup<EAC_Chan< 64>, 64, true>(threads, attr);
+        break;
+      case 128:
+        setup<EAC_Chan<128>,128, true>(threads, attr);
+        break;
+      case 256:
+        setup<EAC_Chan<256>,256, true>(threads, attr);
+        break;
+      case 512:
+        setup<EAC_Chan<512>,512, true>(threads, attr);
+        break;
+      default:
+      std::cerr << "Invalid Size" << std::endl;
+    }
+  }
+  else if(at == EAMPMC && direct && !touch)
+  {
+    switch (datasize)
+    {
+      case 8:
+        setup<EAC_Chan<  8>,  8, false>(threads, attr);
+        break;
+      case 16:
+        setup<EAC_Chan< 16>, 16, false>(threads, attr);
+        break;
+      case 32:
+        setup<EAC_Chan< 32>, 32, false>(threads, attr);
+        break;
+      case 64:
+        setup<EAC_Chan< 64>, 64, false>(threads, attr);
+        break;
+      case 128:
+        setup<EAC_Chan<128>,128, false>(threads, attr);
+        break;
+      case 256:
+        setup<EAC_Chan<256>,256, false>(threads, attr);
+        break;
+      case 512:
+        setup<EAC_Chan<512>,512, false>(threads, attr);
+        break;
+      default:
+      std::cerr << "Invalid Size" << std::endl;
+    }
+  }
+  else if(at == EAMPMC && !direct && touch)
+  {
+    switch (datasize)
+    {
+      case 8:
+        setup<EAZ_Chan<  8>,  8, true>(threads, attr);
+        break;
+      case 16:
+        setup<EAZ_Chan< 16>, 16, true>(threads, attr);
+        break;
+      case 32:
+        setup<EAZ_Chan< 32>, 32, true>(threads, attr);
+        break;
+      case 64:
+        setup<EAZ_Chan< 64>, 64, true>(threads, attr);
+        break;
+      case 128:
+        setup<EAZ_Chan<128>,128, true>(threads, attr);
+        break;
+      case 256:
+        setup<EAZ_Chan<256>,256, true>(threads, attr);
+        break;
+      case 512:
+        setup<EAZ_Chan<512>,512, true>(threads, attr);
+        break;
+      default:
+      std::cerr << "Invalid Size" << std::endl;
+    }
+  }
+  else if(at == EAMPMC && !direct && !touch)
+  {
+    switch (datasize)
+    {
+      case 8:
+        setup<EAZ_Chan<  8>,  8, false>(threads, attr);
+        break;
+      case 16:
+        setup<EAZ_Chan< 16>, 16, false>(threads, attr);
+        break;
+      case 32:
+        setup<EAZ_Chan< 32>, 32, false>(threads, attr);
+        break;
+      case 64:
+        setup<EAZ_Chan< 64>, 64, false>(threads, attr);
+        break;
+      case 128:
+        setup<EAZ_Chan<128>,128, false>(threads, attr);
+        break;
+      case 256:
+        setup<EAZ_Chan<256>,256, false>(threads, attr);
+        break;
+      case 512:
+        setup<EAZ_Chan<512>,512, false>(threads, attr);
+        break;
+      default:
+      std::cerr << "Invalid Size" << std::endl;
+    }
+  }
+#endif //EA
   else
   {
     std::cerr << "Invalid Buffer type" << std::endl;

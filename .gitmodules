@@ -1,0 +1,3 @@
+[submodule "repos/MPMCQueue"]
+	path = repos/MPMCQueue
+	url = https://github.com/rigtorp/MPMCQueue.git

@@ -275,6 +275,47 @@ struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) BSZ_Chan
 
 #endif //BOOST
 
+#ifdef EA
+#include <rigtorp/MPMCQueue.h>
+template<size_t T>
+struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) EAC_Chan
+{
+  rigtorp::MPMCQueue<helper<T>> q;
+  size_t size;
+  unsigned tid;
+  EAC_Chan(size_t s, unsigned tid) : q(4096/T), size(s), tid(tid) {}
+  inline int push(uint8_t* val)
+  {
+    helper<T>& h = *(helper<T>*) val;
+    return q.try_push(h);
+  }
+  inline int popo(uint8_t** val)
+  {
+    helper<T>& h = *(helper<T>*) *val;
+    return q.try_pop(h);
+  }
+};
+
+template<size_t T>
+struct __attribute__((aligned(L1D_CACHE_LINE_SIZE))) EAZ_Chan
+{
+  rigtorp::MPMCQueue<uintptr_t> q;
+  size_t size;
+  unsigned tid;
+  EAZ_Chan(size_t s, unsigned tid) : q(4096/sizeof(uintptr_t)), size(s), tid(tid) {}
+  inline int push(uint8_t* val)
+  {
+    return q.try_push((uintptr_t) val);
+  }
+  inline int popo(uint8_t** val)
+  {
+    uintptr_t& h = *((uintptr_t*) val);
+    return q.try_pop(h);
+  }
+};
+
+#endif //EA
+
 template<typename T, bool touch>
 void* run(void* args)
 {
@@ -334,3 +375,4 @@ void setup(pthread_t* threads, pthread_attr_t* attr)
 }
 
 #endif //_COUNTER_H_
+
